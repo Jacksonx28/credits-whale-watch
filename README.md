@@ -8,11 +8,11 @@ The site follows collector wallets building or retaining enough Credits to compo
 
 ## Scope
 
-- Candidate wallets come from Blockscout's top 100 holder entries. Credit balances and contract code are verified at an Ethereum snapshot block. The holder table includes only candidates without contract code holding 80+ Credits. Contract exclusion can omit legitimate smart-wallet collectors, and indexer lag can omit a newly large holder. This is a monitored cohort, not a holder census.
+- Candidate wallets come from Blockscout's top 100 holder entries. Credit balances and contract code are verified at an Ethereum snapshot block. The holder table includes only candidates without contract code holding 80+ Credits. Contract exclusion in the capacity-change cohort can omit legitimate smart-wallet collectors, and indexer lag can omit a newly large holder. This is a monitored cohort, not a holder census.
 - Credit changes are netted per wallet and transaction. A feed event requires at least eight net Credits added/removed, or crossing a whole 80-Credit bundle boundary, and a balance of 80+ before or after the change. Small changes that do not change bundle capacity, self-transfers, generic Statement transfers, overprints and contract wallet activity are omitted from the feed.
 - A single Credit completing 79 → 80 qualifies. Eight routing Credits received and forwarded in the same transaction, with zero net position change, do not qualify. Transfers are not labelled purchases or sales.
 - All Credit transfers, mint and burn logs in the 48-hour window are replayed against the verified ending balances. Holder position change includes every change, including small transfers omitted from the feed and burns. “Held 80+ throughout 48h” requires the balance never to fall below 80 after any transaction in the window. Capacity and holding are evidence, not proof of a plan to burn or the artistic quality of a curation.
-- Assembly events identify the actual Credit burn owner. A mint to another recipient does not establish that recipient as the burner. Collector assembly burns outside the indexed candidate cohort are also included after checking their contract code.
+- Assembly events identify the actual Credit burn owner. A mint to another recipient does not establish that recipient as the burner. Assembly burns outside the indexed candidate cohort and from contract wallets are also included. Contract-wallet assemblies are labelled after checking their code: a verified composition is relevant even when routine custody transfers are omitted.
 
 ## Evidence and updates
 

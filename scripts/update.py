@@ -140,11 +140,11 @@ def build_activity(credit_logs, statement_logs, holders, block_times, contract_a
         # These are the actual Credit burn owners, rather than NFT recipients.
         if tx_hash in mint_txs:
             for account, amount in tx['burns'].items():
-                if account not in contracts and amount >= 80 and amount % 80 == 0:
+                if amount >= 80 and amount % 80 == 0:
                     statement_ids = [int(log['topics'][3], 16) for log in statement_logs
                         if log['transactionHash'] == tx_hash and log['topics'][0] == TRANSFER
                         and len(log['topics']) == 4 and addr(log['topics'][1]) == ZERO]
-                    events.append({'type': 'assembly', 'wallet': account, 'amount': amount,
+                    events.append({'type': 'assembly', 'wallet': account, 'amount': amount, 'isContract': account in contracts,
                         'statements': statement_ids, 'statement': statement_ids[0],
                         'collection': 'Statements', 'tx': tx_hash, 'block': tx['block'], 'logIndex': tx['logIndex']})
     for holder in holders:
@@ -216,7 +216,7 @@ def main():
                    'overprints': sum(x['topics'][0] == OVERPRINT for x in statements)},
         'holders': holders, 'activity': activity,
         'coverage': {'holderCandidates': len(holders), 'holderSource': 'Blockscout top 100 candidates; balances verified at snapshot block',
-                     'statementHistoryFromBlock': DEPLOYMENT, 'focus': 'Collector capacity: 80+ Credits; net changes of 8+ or any 80-Credit bundle crossing; verified assembly burns; contract addresses excluded'}}
+                     'statementHistoryFromBlock': DEPLOYMENT, 'focus': 'Collector capacity: 80+ Credits; net changes of 8+ or any 80-Credit bundle crossing; verified assembly burns including contract wallets; contracts excluded from capacity-change cohort'}}
     if not mints or len(holders) < 50:
         raise RuntimeError('Unexpected incomplete source; refusing to publish.')
     output = ROOT / 'data/snapshot.json'

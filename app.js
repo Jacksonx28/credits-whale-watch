@@ -39,7 +39,7 @@ function renderBrief(events) {
   const fragment = document.createDocumentFragment();
   const line = el('p');
   const assembled = assemblies.reduce((n, e) => n + e.amount / 80, 0);
-  line.append(el('strong', '', number(assembled) + ' Statements assembled by collector wallets'), document.createTextNode(' in this ' + hours + '-hour window, burning ' + number(assembled * 80) + ' Credits.'));
+  line.append(el('strong', '', number(assembled) + ' Statements assembled'), document.createTextNode(' in this ' + hours + '-hour window, burning ' + number(assembled * 80) + ' Credits.'));
   fragment.append(line);
   const holding = el('p');
   holding.append(el('strong', '', number(held.length) + ' monitored wallets kept 80+ Credits throughout 48h'), document.createTextNode('. ' + number(growing.length) + ' current collector positions grew by at least eight Credits over ' + hours + 'h.'));
@@ -70,6 +70,7 @@ function eventNode(e) {
   const body = el('div');
   const titles = { building: number(e.amount) + ' Credits added to a collector position', reduction: number(e.amount) + ' Credits removed from a collector position', assembly: number(e.amount / 80) + ' Statement' + (e.amount === 80 ? '' : 's') + ' assembled · ' + number(e.amount) + ' Credits burned' };
   const h = el('h3', '', titles[e.type]);
+  if (e.type === 'assembly' && e.isContract) h.append(el('span', 'tag', 'Contract wallet'));
   if (e.type !== 'assembly' && e.crossed) h.append(el('span', 'tag', e.type === 'building' ? 'Bundle completed' : 'Bundle capacity fell'));
   body.append(h);
   const detail = el('p'); detail.append(wallet(e.wallet));
