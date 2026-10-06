@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 
 ROOT = Path(__file__).resolve().parents[1]
 CREDITS = '0x97630aa70ab14ed9883b41dafccbc11349723043'
@@ -89,42 +89,69 @@ def addr(topic):
 def iso(seconds):
     return dt.datetime.fromtimestamp(seconds, dt.timezone.utc).isoformat().replace('+00:00', 'Z')
 
-def build_activity(credit_logs, statement_logs, holders, block_times):
-    grouped = {}
-    for log in credit_logs:
+def build_activity(credit_logs, statement_logs, holders, block_times, contract_addresses=None, snapshot_time=None):
+    """Follow assembly capacity, not individual marketplace/custody transfers."""
+    contracts = set(contract_addresses or []) | {x['address'] for x in holders if x['isContract']}
+    txs, totals = {}, Counter()
+    for log in sorted(credit_logs, key=lambda x: (int(x['blockNumber'], 16), int(x['logIndex'], 16))):
         if log['topics'][0] != TRANSFER or len(log['topics']) != 4:
             continue
         sender, recipient = map(addr, log['topics'][1:3])
-        if sender == ZERO or recipient == ZERO or sender == recipient:
+        if sender == recipient:
             continue
-        key = (log['transactionHash'], sender, recipient)
-        item = grouped.setdefault(key, {'type': 'movement', 'tx': key[0], 'from': sender,
-            'to': recipient, 'amount': 0, 'collection': 'Credits',
-            'block': int(log['blockNumber'], 16), 'tokens': []})
-        item['amount'] += 1
-        item['tokens'].append(int(log['topics'][3], 16))
-    monitored = {x['address'] for x in holders if x['balance'] >= 80}
-    events = [x for x in grouped.values() if x['amount'] >= 80 or x['from'] in monitored or x['to'] in monitored]
-    for log in statement_logs:
-        topic = log['topics'][0]
-        base = {'tx': log['transactionHash'], 'block': int(log['blockNumber'], 16),
-                'collection': 'Statements', 'amount': 1, 'logIndex': int(log['logIndex'], 16)}
-        if topic == OVERPRINT:
-            events.append(dict(base, type='overprint', base=int(log['topics'][1], 16),
-                               top=int(log['topics'][2], 16), wallet=addr(log['topics'][3])))
-        elif topic == TRANSFER and len(log['topics']) == 4:
-            sender, recipient = map(addr, log['topics'][1:3])
-            token = int(log['topics'][3], 16)
-            if sender == ZERO:
-                events.append(dict(base, type='assembly', wallet=recipient, statement=token, amount=80))
-            elif recipient != ZERO and sender != recipient:
-                events.append(dict(base, type='statement-transfer', **{'from': sender, 'to': recipient}, statement=token))
+        tx = txs.setdefault(log['transactionHash'], {'block': int(log['blockNumber'], 16),
+            'logIndex': int(log['logIndex'], 16), 'delta': Counter(), 'in': Counter(), 'out': Counter(), 'burns': Counter()})
+        if sender != ZERO:
+            tx['delta'][sender] -= 1
+            totals[sender] -= 1
+        if recipient != ZERO:
+            tx['delta'][recipient] += 1
+            totals[recipient] += 1
+        if sender != ZERO and recipient != ZERO:
+            tx['out'][sender] += 1
+            tx['in'][recipient] += 1
+        elif recipient == ZERO:
+            tx['burns'][sender] += 1
+    balances = {x['address']: x['balance'] - totals[x['address']] for x in holders if not x['isContract']}
+    cutoff24 = (snapshot_time if snapshot_time is not None else max(block_times.values(), default=0)) - 24 * 3600
+    minimums = dict(balances)
+    for holder in holders:
+        account = holder['address']
+        holder['windowStartBalance'] = holder['balance'] - totals[account]
+        holder['net24h'] = sum(tx['delta'][account] for tx in txs.values() if block_times[tx['block']] >= cutoff24)
+        holder['net48h'] = totals[account]
+        holder['retained48h'] = False
+    mint_txs = Counter(log['transactionHash'] for log in statement_logs
+        if log['topics'][0] == TRANSFER and len(log['topics']) == 4 and addr(log['topics'][1]) == ZERO)
+    events = []
+    for tx_hash, tx in txs.items():
+        for account, before in list(balances.items()):
+            after = before + tx['delta'][account]
+            balances[account] = after
+            minimums[account] = min(minimums[account], after)
+            net = tx['in'][account] - tx['out'][account]
+            crossed = before // 80 != after // 80
+            # Eight Credits is a material tenth of one Statement. Bundle crossings
+            # always qualify, even when just one incoming Credit completes a bundle.
+            if not tx['burns'][account] and max(before, after) >= 80 and net and (abs(net) >= 8 or crossed):
+                events.append({'type': 'building' if net > 0 else 'reduction', 'wallet': account,
+                    'amount': abs(net), 'before': before, 'after': after, 'crossed': crossed,
+                    'collection': 'Credits', 'tx': tx_hash, 'block': tx['block'], 'logIndex': tx['logIndex']})
+        # These are the actual Credit burn owners, rather than NFT recipients.
+        if tx_hash in mint_txs:
+            for account, amount in tx['burns'].items():
+                if account not in contracts and amount >= 80 and amount % 80 == 0:
+                    statement_ids = [int(log['topics'][3], 16) for log in statement_logs
+                        if log['transactionHash'] == tx_hash and log['topics'][0] == TRANSFER
+                        and len(log['topics']) == 4 and addr(log['topics'][1]) == ZERO]
+                    events.append({'type': 'assembly', 'wallet': account, 'amount': amount,
+                        'statements': statement_ids, 'statement': statement_ids[0],
+                        'collection': 'Statements', 'tx': tx_hash, 'block': tx['block'], 'logIndex': tx['logIndex']})
+    for holder in holders:
+        holder['retained48h'] = not holder['isContract'] and minimums.get(holder['address'], 0) >= 80
     for item in events:
         item['timestamp'] = block_times[item['block']]
-        item['id'] = item['tx'] + ':' + item['type'] + ':' + str(item.get('from', item.get('statement', item.get('base', '')))) + ':' + str(item.get('to', '')) + ':' + str(item.get('logIndex', ''))
-        # Avoid unnecessarily shipping very large token lists; count stays exact.
-        if 'tokens' in item:
-            item['tokens'] = item['tokens'][:12]
+        item['id'] = item['tx'] + ':' + item['type'] + ':' + item['wallet']
     return sorted(events, key=lambda x: (x['timestamp'], x['block'], x['id']), reverse=True)
 
 def main():
@@ -173,9 +200,15 @@ def main():
     missing = [b for b in blocks if b not in block_times]
     raw_times = batch([('eth_getBlockByNumber', [hex(b), False]) for b in missing])
     block_times.update({b: int(x['timestamp'], 16) for b, x in zip(missing, raw_times)})
-    activity = build_activity(credit_logs, recent_statements, holders, block_times)
+    burn_owners = sorted({addr(x['topics'][1]) for x in credit_logs if x['topics'][0] == TRANSFER and len(x['topics']) == 4 and addr(x['topics'][2]) == ZERO})
+    code_addresses = sorted(set(burn_owners) | {h['address'] for h in holders})
+    codes = batch([('eth_getCode', [a, hex(head)]) for a in code_addresses])
+    contracts = {a for a, code in zip(code_addresses, codes) if code != '0x'}
+    for holder in holders:
+        holder['isContract'] = holder['address'] in contracts
+    activity = build_activity(credit_logs, recent_statements, holders, block_times, contracts, head_time)
     now = iso(time.time())
-    snapshot = {'version': 1, 'generatedAt': now, 'block': head, 'blockTimestamp': iso(head_time),
+    snapshot = {'version': 2, 'generatedAt': now, 'block': head, 'blockTimestamp': iso(head_time),
         'windowStart': iso(timestamp(start)), 'rpc': RPC, 'confirmations': 12,
         'contracts': {'credits': CREDITS, 'statements': STATEMENTS},
         'totals': {'creditsBurnedIntoStatements': len(mints) * 80, 'statementsComposed': len(mints),
@@ -183,7 +216,7 @@ def main():
                    'overprints': sum(x['topics'][0] == OVERPRINT for x in statements)},
         'holders': holders, 'activity': activity,
         'coverage': {'holderCandidates': len(holders), 'holderSource': 'Blockscout top 100 candidates; balances verified at snapshot block',
-                     'statementHistoryFromBlock': DEPLOYMENT}}
+                     'statementHistoryFromBlock': DEPLOYMENT, 'focus': 'Collector capacity: 80+ Credits; net changes of 8+ or any 80-Credit bundle crossing; verified assembly burns; contract addresses excluded'}}
     if not mints or len(holders) < 50:
         raise RuntimeError('Unexpected incomplete source; refusing to publish.')
     output = ROOT / 'data/snapshot.json'
