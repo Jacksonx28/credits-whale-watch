@@ -67,7 +67,7 @@ function eventNode(e) {
   body.append(h);
   const p = el('p');
   if (e.type === 'movement' || e.type === 'statement-transfer') p.append(wallet(e.from), document.createTextNode(' → '), wallet(e.to));
-  else if (e.type === 'assembly') p.append(wallet(e.wallet), document.createTextNode(' burned 80 Credits to make a new page.'));
+  else if (e.type === 'assembly') p.append(wallet(e.wallet), document.createTextNode(' received a new page; 80 Credits were burned in this transaction.'));
   else p.append(wallet(e.wallet), document.createTextNode(' combined two pages; the top Statement was burned.'));
   body.append(p);
   if (e.statement) { const l = el('p'); l.append(link('https://jack.art/credits/statement/' + e.statement, 'View Statement ↗')); body.append(l); }
