@@ -1,12 +1,14 @@
 name: Update onchain dashboard
 on:
-  schedule:
-    - cron: '17 * * * *'
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/**
-      - .github/workflows/update.yml
+# Updates paused at Jackson's request until he explicitly asks to resume.
+# Previous automatic triggers to restore on resumption:
+#   schedule:
+#     - cron: '17 * * * *'
+#   push:
+#     paths:
+#       - scripts/**
+#       - .github/workflows/update.yml
 permissions:
   contents: write
   pages: write
@@ -15,6 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   collect:
+    if: ${{ false }} # Paused until the owner asks to resume.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
